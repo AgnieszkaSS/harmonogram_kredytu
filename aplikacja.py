@@ -1,13 +1,7 @@
 """
 APLIKACJA: CLAUDE + FUNCTION CALLING
 ====================================
-Claude rozumie pytanie po polsku, wyłapuje z niego liczby
-i woła nasz kalkulator z pliku obliczenia.py.
-
-Przygotowanie:
-    pip install anthropic
-    export ANTHROPIC_API_KEY="twoj-klucz"      # Linux/Mac
-    setx ANTHROPIC_API_KEY "twoj-klucz"        # Windows
+Claude rozumie pytanie po polsku, wyłapuje z niego liczby i woła nasz kalkulator z pliku obliczenia.py.
 Uruchomienie:
     python aplikacja.py
 """
@@ -15,9 +9,6 @@ Uruchomienie:
 import json
 import anthropic
 from obliczenia import oblicz_harmonogram
-
-client = anthropic.Anthropic()   # klucz czytany z ANTHROPIC_API_KEY
-
 
 # 1. OPIS NARZĘDZIA — to jest jedyne, co "widzi" Claude o naszym kalkulatorze.
 #    Dobre opisy = model trafnie wybiera funkcję i argumenty.
@@ -55,7 +46,6 @@ NARZEDZIA = [
     }
 ]
 
-
 # 2. WYKONANIE NARZĘDZIA — łączymy nazwę od Claude'a z prawdziwą funkcją.
 def wykonaj_narzedzie(nazwa, argumenty):
     if nazwa != "oblicz_harmonogram_splaty":
@@ -83,48 +73,68 @@ def wykonaj_narzedzie(nazwa, argumenty):
         "calkowity_koszt": round(wynik["calkowity_koszt"], 2),
     }
 
+class Chatbot:
+    def __init__(self, model : str, system_prompt : str, max_tokens : int):
+        self.context = []
+        self.model = model
+        self.tools = NARZEDZIA
+        self.max_tokens = max_tokens
+        self.system_prompt = system_prompt
+        
+        #klucz czytany z ANTHROPIC_API_KEY
+        self.client = anthropic.Anthropic()
+      
+    def extend_context(self, side, content):
+        self.context.append({"role": side, "content": content})
+      
+    # 3. PĘTLA AGENTOWA — serce Function Calling.
+    def query(self, user_input): 
+        self.extend_context("user", user_input)
+        
+        while True:
+            odpowiedz = self.client.messages.create(
+                model = self.model,
+                max_tokens = self.max_tokens,
+                system = self.system_prompt,
+                tools = NARZEDZIA,
+                messages = self.context,
+            )
 
-# 3. PĘTLA AGENTOWA — serce Function Calling.
-def zapytaj(pytanie):
-    wiadomosci = [{"role": "user", "content": pytanie}]
+            # zapamiętujemy odpowiedź modelu (API jest bezstanowe!)
+            self.extend_context("assistant", odpowiedz.content)
+        
+            # Claude skończył i nie chce już narzędzia -> zwracamy tekst.
+            if odpowiedz.stop_reason != "tool_use":
+                return "".join(b.text for b in odpowiedz.content if b.type == "text")
 
-    while True:
-        odpowiedz = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
-            system=("Jesteś doradcą kredytowym. Do WSZYSTKICH obliczeń ZAWSZE używaj "
-                    "narzędzia, nigdy nie licz w pamięci. Wynik wyjaśnij prosto, po polsku."),
-            tools=NARZEDZIA,
-            messages=wiadomosci,
-        )
+            # Claude poprosił o narzędzie -> wykonujemy i odsyłamy wynik.
+            wyniki = []
+            for blok in odpowiedz.content:
+                if blok.type == "tool_use":
+                    rezultat = wykonaj_narzedzie(blok.name, blok.input)
+                    wyniki.append({
+                        "type": "tool_result",
+                        "tool_use_id": blok.id,
+                        "content": json.dumps(rezultat, ensure_ascii=False),
+                    })
+        
+            self.extend_context("user", wyniki)
 
-        # zapamiętujemy odpowiedź modelu (API jest bezstanowe!)
-        wiadomosci.append({"role": "assistant", "content": odpowiedz.content})
-
-        # Claude skończył i nie chce już narzędzia -> zwracamy tekst.
-        if odpowiedz.stop_reason != "tool_use":
-            return "".join(b.text for b in odpowiedz.content if b.type == "text")
-
-        # Claude poprosił o narzędzie -> wykonujemy i odsyłamy wynik.
-        wyniki = []
-        for blok in odpowiedz.content:
-            if blok.type == "tool_use":
-                rezultat = wykonaj_narzedzie(blok.name, blok.input)
-                wyniki.append({
-                    "type": "tool_result",
-                    "tool_use_id": blok.id,
-                    "content": json.dumps(rezultat, ensure_ascii=False),
-                })
-        wiadomosci.append({"role": "user", "content": wyniki})
-
+MODEL = "claude-sonnet-4-6"
+SYSTEM_PROMPT = "Jesteś doradcą kredytowym. Do WSZYSTKICH obliczeń ZAWSZE używaj narzędzia, nigdy nie licz w pamięci. Wynik wyjaśnij prosto, po polsku. Wyniki są wyświetlane w terminalu windows, zatem nie używaj formatu markdown i emoji."
+MAX_TOKENS = 1024
 
 def main():
     print("Witaj w kalkulatorze harmonogramu spłat kredytu.\nOpisz swój kredyt w celu obliczenia harmonogramu.");
     #pytanie = ("Policz ratę kredytu 300 000 zł, oprocentowanie 7%, na 30 lat, "
     #           "raty malejące, z 6-miesięczną karencją tylko na odsetki.")
-    pytanie = input()
-    print("PYTANIE:", pytanie, "\n")
-    print("ODPOWIEDŹ:\n", zapytaj(pytanie))
-    
+   
+    chatbot = Chatbot(MODEL, SYSTEM_PROMPT, MAX_TOKENS)
+   
+    while(True):
+        print("\n================== Użytkownik ==================\n" )
+        pytanie = input()
+        print("\n================== Asystent ==================\n", chatbot.query(pytanie))
+        
 if __name__ == "__main__":
     main()
