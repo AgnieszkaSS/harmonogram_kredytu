@@ -18,7 +18,7 @@ class Rata:
     saldo_po: float    # ile długu zostaje po tej racie
 
 
-def _amortyzuj(saldo, liczba_rat, r, typ_rat, nr_start=1):
+def licz_raty(saldo, liczba_rat, r, typ_rat, nr_start=1):
     """
     'Normalna' faza spłaty (po ewentualnej karencji).
     saldo      - kwota do spłaty na start tej fazy
@@ -50,6 +50,16 @@ def _amortyzuj(saldo, liczba_rat, r, typ_rat, nr_start=1):
             rata = kapital_staly + odsetki
             saldo -= kapital_staly
             raty.append(Rata(nr_start + i, rata, kapital_staly, odsetki, saldo))
+
+    elif typ_rat == "balonowe":
+        # Kredyt balonowy: przez cały okres płacisz SAME odsetki (dług stoi),
+        # a cały kapitał oddajesz jednorazowo w ostatniej (balonowej) racie.
+        for i in range(liczba_rat):
+            odsetki = saldo * r
+            kapital = saldo if i == liczba_rat - 1 else 0.0  # tylko ostatnia rata
+            rata = kapital + odsetki
+            saldo -= kapital
+            raty.append(Rata(nr_start + i, rata, kapital, odsetki, saldo))
     else:
         raise ValueError(f"Nieznany typ rat: {typ_rat}")
 
@@ -58,14 +68,18 @@ def _amortyzuj(saldo, liczba_rat, r, typ_rat, nr_start=1):
 
 def oblicz_harmonogram(kwota_kredytu, oprocentowanie_roczne, liczba_rat,
                        typ_rat="rowne", karencja_miesiace=0, typ_karencji="brak"):
-    print("oblicz_harmonogram");                       
     """
     Główna funkcja. Zwraca słownik z pełnym harmonogramem i podsumowaniem kosztów.
+
+    typ_rat:
+      'rowne'    - co miesiąc ta sama rata (annuitetowa)
+      'malejace' - stała część kapitałowa, rata maleje
+      'balonowe' - same odsetki przez cały okres, cały kapitał w ostatniej racie
 
     typ_karencji:
       'brak'          - bez karencji
       'tylko_odsetki' - w karencji płacisz same odsetki, dług się nie zmienia
-      'kapitalizacja' - w karencji nie płacisz nic, odsetki doliczają się do długu
+      'wakacje_kredytowe' - w karencji nie płacisz nic, odsetki doliczają się do długu
     Uwaga: liczba_rat to ŁĄCZNA liczba miesięcy, wliczając karencję.
     """
     # --- walidacja (przypadki brzegowe) ---
@@ -88,7 +102,7 @@ def oblicz_harmonogram(kwota_kredytu, oprocentowanie_roczne, liczba_rat,
             if typ_karencji == "tylko_odsetki":
                 # płacisz odsetki, dług bez zmian
                 harmonogram.append(Rata(nr, odsetki, 0.0, odsetki, saldo))
-            elif typ_karencji == "kapitalizacja":
+            elif typ_karencji == "wakacje_kredytowe":
                 # nie płacisz nic, odsetki powiększają dług
                 saldo += odsetki
                 harmonogram.append(Rata(nr, 0.0, 0.0, odsetki, saldo))
@@ -98,7 +112,7 @@ def oblicz_harmonogram(kwota_kredytu, oprocentowanie_roczne, liczba_rat,
 
     # --- FAZA WŁAŚCIWEJ SPŁATY ---
     pozostale_raty = liczba_rat - karencja_miesiace
-    harmonogram += _amortyzuj(saldo, pozostale_raty, r, typ_rat, nr_start=nr)
+    harmonogram += licz_raty(saldo, pozostale_raty, r, typ_rat, nr_start=nr)
 
     # --- podsumowanie ---
     suma_odsetek = sum(x.odsetki for x in harmonogram)

@@ -11,12 +11,12 @@ import anthropic
 from obliczenia import oblicz_harmonogram
 
 # 1. OPIS NARZĘDZIA — to jest jedyne, co "widzi" Claude o naszym kalkulatorze.
-#    Dobre opisy = model trafnie wybiera funkcję i argumenty.
 NARZEDZIA = [
     {
         "name": "oblicz_harmonogram_splaty",
         "description": (
-            "Oblicza harmonogram spłaty kredytu. Obsługuje raty równe i malejące "
+            "Oblicza harmonogram spłaty kredytu. Obsługuje raty równe, malejące "
+            "i balonowe (same odsetki przez cały okres, cały kapitał w ostatniej racie) "
             "oraz karencję (okres ulgi na początku). Zwraca podsumowanie kosztów."
         ),
         "input_schema": {
@@ -32,13 +32,13 @@ NARZEDZIA = [
                     "type": "integer", "description": "Łączna liczba rat/miesięcy (wliczając karencję)"
                 },
                 "typ_rat": {
-                    "type": "string", "enum": ["rowne", "malejace"]
+                    "type": "string", "enum": ["rowne", "malejace", "balonowe"]
                 },
                 "karencja_miesiace": {
                     "type": "integer", "description": "Liczba miesięcy karencji, 0 jeśli brak"
                 },
                 "typ_karencji": {
-                    "type": "string", "enum": ["brak", "tylko_odsetki", "kapitalizacja"]
+                    "type": "string", "enum": ["brak", "tylko_odsetki", "wakacje_kredytowe"]
                 },
             },
             "required": ["kwota_kredytu", "oprocentowanie_roczne", "liczba_rat", "typ_rat"],
@@ -46,7 +46,15 @@ NARZEDZIA = [
     }
 ]
 
-# 2. WYKONANIE NARZĘDZIA — łączymy nazwę od Claude'a z prawdziwą funkcją.
+def opisz_rate(x):
+    return {
+        "nr": x.nr,
+        "rata": round(x.rata, 2),
+        "kapital": round(x.kapital, 2),
+        "odsetki": round(x.odsetki, 2),
+        "saldo_po": round(x.saldo_po, 2),
+    }
+
 def wykonaj_narzedzie(nazwa, argumenty):
     if nazwa != "oblicz_harmonogram_splaty":
         return {"blad": f"Nieznane narzędzie: {nazwa}"}
@@ -62,17 +70,34 @@ def wykonaj_narzedzie(nazwa, argumenty):
     except Exception as e:
         # Błąd odsyłamy modelowi — sam go ładnie wyjaśni użytkownikowi.
         return {"blad": str(e)}
-
-    # Modelowi dajemy STRESZCZENIE, a nie 360 wierszy — to oszczędza tokeny.
+ 
+    # Wybór rat do pokazania zależy od rodzaju kredytu.
     h = wynik["harmonogram"]
+    typ_rat = argumenty["typ_rat"]
+    ma_karencje = (argumenty.get("karencja_miesiace", 0) > 0
+                   and argumenty.get("typ_karencji", "brak") != "brak")
+ 
+    if typ_rat == "balonowe":
+        # tylko pierwsza i ostatnia (balonowa) rata
+        wybrane = [h[0], h[-1]]
+    elif ma_karencje:
+        # pierwsza rata, pierwsza rata z kapitałem (po karencji) i ostatnia
+        pierwsza_z_kapitalem = next((x for x in h if x.kapital > 0), h[-1])
+        wybrane = [h[0], pierwsza_z_kapitalem, h[-1]]
+    else:
+        # bez karencji: trzy pierwsze i trzy ostatnie raty
+        wybrane = h[:3] + h[-3:]
+ 
+    # usunięcie ewentualnych duplikatów (krótkie kredyty), z zachowaniem kolejności
+    wybrane = list({x.nr: x for x in wybrane}.values())
+ 
     return {
-        "pierwsza_rata": round(h[0].rata, 2),
-        "ostatnia_rata": round(h[-1].rata, 2),
+        "raty": [opisz_rate(x) for x in wybrane],
         "liczba_rat": len(h),
         "suma_odsetek": round(wynik["suma_odsetek"], 2),
         "calkowity_koszt": round(wynik["calkowity_koszt"], 2),
     }
-
+ 
 class Chatbot:
     def __init__(self, model : str, system_prompt : str, max_tokens : int):
         self.context = []
@@ -121,20 +146,16 @@ class Chatbot:
             self.extend_context("user", wyniki)
 
 MODEL = "claude-sonnet-4-6"
-SYSTEM_PROMPT = "Jesteś doradcą kredytowym. Do WSZYSTKICH obliczeń ZAWSZE używaj narzędzia, nigdy nie licz w pamięci. Wynik wyjaśnij prosto, po polsku. Wyniki są wyświetlane w terminalu windows, zatem nie używaj formatu markdown i emoji."
 MAX_TOKENS = 1024
+SYSTEM_PROMPT = "Jesteś doradcą kredytowym. Do WSZYSTKICH obliczeń ZAWSZE używaj narzędzia, nigdy nie licz w pamięci. Wynik wyjaśnij prosto, po polsku. Wyniki są wyświetlane w terminalu windows, zatem nie używaj formatu markdown i emoji."
 
 def main():
-    print("Witaj w kalkulatorze harmonogramu spłat kredytu.\nOpisz swój kredyt w celu obliczenia harmonogramu.");
-    #pytanie = ("Policz ratę kredytu 300 000 zł, oprocentowanie 7%, na 30 lat, "
-    #           "raty malejące, z 6-miesięczną karencją tylko na odsetki.")
-   
     chatbot = Chatbot(MODEL, SYSTEM_PROMPT, MAX_TOKENS)
-   
+    print("Witaj w kalkulatorze harmonogramu spłat kredytu.\nOpisz swój kredyt w celu obliczenia harmonogramu.");
     while(True):
         print("\n================== Użytkownik ==================\n" )
         pytanie = input()
-        print("\n================== Asystent ==================\n", chatbot.query(pytanie))
+        print("\n================== Asystent ==================\n\n", chatbot.query(pytanie))
         
 if __name__ == "__main__":
     main()
