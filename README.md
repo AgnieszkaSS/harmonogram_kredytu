@@ -25,36 +25,15 @@ Obsługiwane rodzaje spłaty:
 
 ## Instalacja
 
-1. (Zalecane) utwórz i aktywuj wirtualne środowisko:
-
-   ```bash
-   python -m venv venv
-   source venv/bin/activate     # Linux / macOS
-   venv\Scripts\activate        # Windows
-   ```
-
-2. Zainstaluj zależności:
+1. Zainstaluj zależności:
 
    ```bash
    pip install -r requirements.txt
    ```
 
-3. Ustaw klucz API w zmiennej środowiskowej:
-
-   ```bash
-   export ANTHROPIC_API_KEY="twoj-klucz"     # Linux / macOS
-   setx ANTHROPIC_API_KEY "twoj-klucz"       # Windows (nowe okno terminala)
-   ```
+2. Ustaw klucz API w zmiennej środowiskowej `ANTHROPIC_API_KEY`:
 
 ## Uruchomienie
-
-Sam kalkulator (bez API, do sprawdzenia poprawności liczb):
-
-```bash
-python obliczenia.py
-```
-
-Pełna aplikacja z Claude:
 
 ```bash
 python aplikacja.py
